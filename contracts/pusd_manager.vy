@@ -13,20 +13,30 @@ interface ERC20:
     def transfer(_to: address, _value: uint256) -> bool: nonpayable
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
 
+interface AAVEPoolV3:
+    def supply(asset: address, amount: uint256, onBehalfOf: address, referralCode: uint16): nonpayable
+    def withdraw(asset: address, amount: uint256, to: address) -> uint256: nonpayable
+
 USDT: public(immutable(address))
-pwUSDT: public(immutable(address))
+Pool: public(immutable(address))
+GOV: public(immutable(address))
 compass_evm: public(address)
-nonce: public(uint256)
+withdraw_nonces: public(HashMap[uint256, bool])
+deposit_nonce: public(uint256)
 paloma: public(bytes32)
+total_supply: public(uint256)
 
-event Deposit:
+event Deposited:
     sender: indexed(address)
-    receiver: bytes32
+    recipient: bytes32
     amount: uint256
+    nonce: uint256
 
-event Withdraw:
-    receiver: indexed(address)
+event Withdrawn:
+    sender: bytes32
+    recipient: indexed(address)
     amount: uint256
+    nonce: uint256
 
 event UpdateCompass:
     old_compass: address
@@ -36,10 +46,12 @@ event SetPaloma:
     paloma: bytes32
 
 @deploy
-def __init__(_compass_evm: address, _usdt: address, _pw_usdt: address):
+def __init__(_compass_evm: address, _usdt: address, _pool: address, _governance: address):
     self.compass_evm = _compass_evm
     USDT = _usdt
-    pwUSDT = _pw_usdt
+    Pool = _pool
+    GOV = _governance
+    assert extcall ERC20(USDT).approve(Pool, max_value(uint256), default_return_value=True), "Failed approve"
     log UpdateCompass(empty(address), _compass_evm)
 
 @internal
@@ -56,21 +68,31 @@ def _safe_transfer_from(_token: address, _from: address, _to: address, _value: u
     assert extcall ERC20(_token).transferFrom(_from, _to, _value, default_return_value=True), "Failed transferFrom"
 
 @external
-def deposit(receiver: bytes32, amount: uint256):
+def deposit(recipient: bytes32, amount: uint256):
     assert amount > 0, "Invalid amount"
+    _last_nonce: uint256 = self.deposit_nonce
     self._safe_transfer_from(USDT, msg.sender, self, amount)
-    log Deposit(msg.sender, receiver, amount)
+    extcall AAVEPoolV3(Pool).supply(USDT, amount, self, 0)
+    self.total_supply += amount
+    self.deposit_nonce = _last_nonce + 1
+    log Deposited(msg.sender, recipient, amount, _last_nonce)
 
 @external
-def withdraw(receiver: address, amount: uint256, nonce: uint256):
+def withdraw(sender: bytes32, recipient: address, amount: uint256, nonce: uint256):
     self._paloma_check()
-    _last_nonce: uint256 = self.nonce
-    assert nonce == _last_nonce, "Invalid nonce"
-    assert receiver != self.compass_evm, "Invalid receiver"
+    assert not self.withdraw_nonces[nonce], "Invalid nonce"
+    assert recipient != self.compass_evm, "Invalid recipient"
     assert amount > 0, "Invalid amount"
-    self._safe_transfer(USDT, receiver, amount)
-    self.nonce = _last_nonce + 1
-    log Withdraw(receiver, amount)
+    _total_supply: uint256 = self.total_supply
+    assert _total_supply >= amount, "Insufficient deposit"
+    extcall AAVEPoolV3(Pool).withdraw(USDT, max_value(uint256), self)
+    self._safe_transfer(USDT, recipient, amount)
+    _total_supply = _total_supply - amount
+    extcall AAVEPoolV3(Pool).supply(USDT, _total_supply, self, 0)
+    self._safe_transfer(USDT, GOV, staticcall ERC20(USDT).balanceOf(self))
+    self.total_supply = _total_supply
+    self.withdraw_nonces[nonce] = True
+    log Withdrawn(sender, recipient, amount, nonce)
 
 @external
 def update_compass(new_compass: address):
