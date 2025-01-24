@@ -50,8 +50,8 @@ event UpdateCompass:
     new_compass: address
 
 event UpdateRefundWallet:
-    old_refund_wallet: address
-    new_refund_wallet: address
+    old_wallet: address
+    new_wallet: address
 
 event SetPaloma:
     paloma: bytes32
@@ -67,6 +67,7 @@ def __init__(_compass_evm: address, _usdt: address, _pool: address, _aggregator:
     self.refund_wallet = _refund_wallet
     assert extcall ERC20(USDT).approve(Pool, max_value(uint256), default_return_value=True), "Failed approve"
     log UpdateCompass(empty(address), _compass_evm)
+    log UpdateRefundWallet(empty(address), _refund_wallet)
 
 @internal
 def _paloma_check():
@@ -84,10 +85,16 @@ def _safe_transfer_from(_token: address, _from: address, _to: address, _value: u
 @external
 def deposit(recipient: bytes32, amount: uint256):
     assert amount > 0, "Invalid amount"
+    _total_supply: uint256 = self.total_supply
+    if _total_supply > 0:
+        extcall AAVEPoolV3(Pool).withdraw(USDT, max_value(uint256), self)
+        _amount: uint256 = staticcall ERC20(USDT).balanceOf(self) - _total_supply
+        if _amount > 0:
+            self._safe_transfer(USDT, GOV, _amount)
     _last_nonce: uint256 = self.deposit_nonce
     self._safe_transfer_from(USDT, msg.sender, self, amount)
-    extcall AAVEPoolV3(Pool).supply(USDT, amount, self, 0)
-    self.total_supply += amount
+    extcall AAVEPoolV3(Pool).supply(USDT, staticcall ERC20(USDT).balanceOf(self), self, 0)
+    self.total_supply = _total_supply + amount
     self.deposit_nonce = _last_nonce + 1
     log Deposited(msg.sender, recipient, amount, _last_nonce)
 
@@ -130,8 +137,9 @@ def update_compass(new_compass: address):
 @external
 def update_refund_wallet(_new_refund_wallet: address):
     self._paloma_check()
+    _old_refund_wallet: address = self.refund_wallet
     self.refund_wallet = _new_refund_wallet
-    log UpdateRefundWallet(self.refund_wallet, _new_refund_wallet)
+    log UpdateRefundWallet(_old_refund_wallet, _new_refund_wallet)
 
 @external
 def set_paloma():
