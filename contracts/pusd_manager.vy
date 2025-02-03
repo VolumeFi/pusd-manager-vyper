@@ -115,7 +115,6 @@ def deposit(recipient: bytes32, amount: uint256, path: Bytes[204] = b"", min_amo
         if _amount > 0:
             self._safe_transfer(USDT, GOV, _amount)
     _last_nonce: uint256 = self.deposit_nonce
-    from_token: address = convert(slice(path, 0, 20), address)
     _balance: uint256 = 0
     if path == b"":
         if msg.value > 0:
@@ -123,6 +122,7 @@ def deposit(recipient: bytes32, amount: uint256, path: Bytes[204] = b"", min_amo
         self._safe_transfer_from(USDT, msg.sender, self, amount)
         _balance = amount
     else:
+        from_token: address = convert(slice(path, 0, 20), address)
         assert len(path) >= 43, "Path error"
         assert min_amount > 0, "Invalid min amount"
         if from_token == WETH9 and msg.value >= amount:
