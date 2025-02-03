@@ -124,6 +124,7 @@ def deposit(recipient: bytes32, amount: uint256, path: Bytes[204] = b"", min_amo
         _balance = amount
     else:
         assert len(path) >= 43, "Path error"
+        assert min_amount > 0, "Invalid min amount"
         if from_token == WETH9 and msg.value >= amount:
             if msg.value > amount:
                 raw_call(msg.sender, b"", value=unsafe_sub(msg.value, amount))
