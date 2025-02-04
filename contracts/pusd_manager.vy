@@ -164,7 +164,7 @@ def withdraw(sender: bytes32, recipient: address, amount: uint256, nonce: uint25
     answered_in_round: uint80 = 0
     round_id, price, start_at, update_at, answered_in_round = staticcall ChainlinkAggregator(Aggregator).latestRoundData()
     assert price > 0, "Invalid price"
-    _amount: uint256 = remaining_gas * gas_price * convert(price, uint256) * 10 ** convert(staticcall ERC20(USDT).decimals(), uint256) // 10 ** Exponent
+    _amount: uint256 = remaining_gas * gas_price * convert(price, uint256) * 10 ** convert(staticcall ERC20(USDT).decimals(), uint256) // 10 ** (Exponent + 18)
     assert amount >= _amount + _amount, "Amount can not cover gas fee"
     self._safe_transfer(USDT, GOV, _amount)
     self._safe_transfer(USDT, self.refund_wallet, _amount)
