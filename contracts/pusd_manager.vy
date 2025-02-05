@@ -170,7 +170,8 @@ def withdraw(sender: bytes32, recipient: address, amount: uint256, nonce: uint25
     self._safe_transfer(USDT, self.refund_wallet, _amount)
     self._safe_transfer(USDT, recipient, amount - _amount - _amount)
     _total_supply = _total_supply - amount
-    extcall AAVEPoolV3(Pool).supply(USDT, _total_supply, self, 0)
+    if _total_supply > 0:
+        extcall AAVEPoolV3(Pool).supply(USDT, _total_supply, self, 0)
     self._safe_transfer(USDT, GOV, staticcall ERC20(USDT).balanceOf(self))
     self.total_supply = _total_supply
     self.withdraw_nonces[nonce] = True
