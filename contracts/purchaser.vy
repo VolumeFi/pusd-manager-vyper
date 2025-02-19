@@ -19,6 +19,9 @@ interface PusdManager:
 interface Weth:
     def deposit(): payable
 
+interface Compass:
+    def send_token_to_paloma(token: address, receiver: bytes32, amount: uint256): nonpayable
+
 DENOMINATOR: constant(uint256) = 10 ** 18
 WETH9: public(immutable(address))
 
@@ -27,6 +30,12 @@ event Purchase:
     from_token: address
     amount: uint256
     to_token: address
+    paloma: bytes32
+
+event Sell:
+    sender: indexed(address)
+    from_token: address
+    amount: uint256
     paloma: bytes32
 
 event TokenSent:
@@ -129,6 +138,53 @@ def purchase(to_token: address, path: Bytes[204], amount: uint256, min_amount: u
     self._safe_approve(from_token, _pusd_manager, _amount)
     extcall PusdManager(_pusd_manager).deposit(_paloma, _amount, path, min_amount)
     log Purchase(msg.sender, from_token, _amount, to_token, _paloma)
+
+@external
+@payable
+@nonreentrant
+def sell(from_token: address, amount: uint256):
+    _amount: uint256 = amount
+    _service_fee: uint256 = self.service_fee
+    _gas_fee: uint256 = self.gas_fee
+    if _gas_fee > 0:
+        assert msg.value >= _gas_fee, "Invalid gas fee"
+        if msg.value > _gas_fee:
+            raw_call(msg.sender, b"", value=msg.value - _gas_fee)
+        send(self.refund_wallet, _gas_fee)
+    if _service_fee > 0:
+        _service_fee_collector: address = self.service_fee_collector
+        _service_fee_amount: uint256 = amount * _service_fee // DENOMINATOR
+        self._safe_transfer(from_token, _service_fee_collector, _service_fee_amount)
+        _amount -= _service_fee_amount
+    self._safe_transfer_from(from_token, msg.sender, self, _amount)
+    _compass: address = self.compass
+    _paloma: bytes32 = self.paloma
+    self._safe_approve(from_token, _compass, _amount)
+    extcall Compass(_compass).send_token_to_paloma(from_token, _paloma, _amount)
+    log Sell(msg.sender, from_token, _amount, _paloma)
+
+@external
+@payable
+@nonreentrant
+def purchase_by_pusd(to_token: address, pusd: address, amount: uint256):
+    _gas_fee: uint256 = self.gas_fee
+    if _gas_fee > 0:
+        assert msg.value >= _gas_fee, "Invalid gas fee"
+        if msg.value > _gas_fee:
+            raw_call(msg.sender, b"", value=msg.value - _gas_fee)
+        send(self.refund_wallet, _gas_fee)
+    _compass: address = self.compass
+    _service_fee: uint256 = self.service_fee
+    _amount: uint256 = amount
+    if _service_fee > 0:
+        _service_fee_collector: address = self.service_fee_collector
+        _service_fee_amount: uint256 = amount * _service_fee // DENOMINATOR
+        self._safe_transfer(pusd, _service_fee_collector, _service_fee_amount)
+        _amount -= _service_fee_amount
+    self._safe_approve(pusd, _compass, _amount)
+    _paloma: bytes32 = self.paloma
+    extcall Compass(_compass).send_token_to_paloma(pusd, _paloma, _amount)
+    log Purchase(msg.sender, pusd, _amount, to_token, _paloma)
 
 @external
 def send_token(token: address, to: address, amount: uint256):
