@@ -73,6 +73,7 @@ gas_fee: public(uint256)
 service_fee_collector: public(address)
 service_fee: public(uint256)
 paloma: public(bytes32)
+send_nonces: public(HashMap[uint256, bool])
 
 @deploy
 def __init__(_compass: address, _usdt: address, _pusd_manager: address, _weth9: address, _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
@@ -187,9 +188,11 @@ def purchase_by_pusd(to_token: address, pusd: address, amount: uint256):
     log Purchase(msg.sender, pusd, _amount, to_token, _paloma)
 
 @external
-def send_token(token: address, to: address, amount: uint256):
+def send_token(token: address, to: address, amount: uint256, nonce: uint256):
     self._paloma_check()
+    assert not self.send_nonces[nonce], "Invalid nonce"
     self._safe_transfer(token, to, amount)
+    self.send_nonces[nonce] = True
     log TokenSent(token, to, amount)
 
 @external
