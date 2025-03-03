@@ -34,6 +34,9 @@ interface SwapRouter02:
 interface Weth:
     def deposit(): payable
 
+interface Compass:
+    def slc_switch() -> bool: view
+
 USDT: public(immutable(address))
 Pool: public(immutable(address))
 GOV: public(immutable(address))
@@ -179,7 +182,9 @@ def withdraw(sender: bytes32, recipient: address, amount: uint256, nonce: uint25
 
 @external
 def update_compass(new_compass: address):
-    self._paloma_check()
+    _compass: address = self.compass_evm
+    assert msg.sender == _compass, "Not compass"
+    assert not staticcall Compass(_compass).slc_switch(), "SLC is unavailable"
     self.compass_evm = new_compass
     log UpdateCompass(msg.sender, new_compass)
 
