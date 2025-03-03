@@ -21,6 +21,7 @@ interface Weth:
 
 interface Compass:
     def send_token_to_paloma(token: address, receiver: bytes32, amount: uint256): nonpayable
+    def slc_switch() -> bool: view
 
 DENOMINATOR: constant(uint256) = 10 ** 18
 WETH9: public(immutable(address))
@@ -197,7 +198,9 @@ def send_token(token: address, to: address, amount: uint256, nonce: uint256):
 
 @external
 def update_compass(new_compass: address):
-    self._paloma_check()
+    _compass: address = self.compass
+    assert msg.sender == _compass, "Not compass"
+    assert not staticcall Compass(_compass).slc_switch(), "SLC is unavailable"
     self.compass = new_compass
     log UpdateCompass(msg.sender, new_compass)
 
