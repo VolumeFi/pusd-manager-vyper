@@ -109,7 +109,7 @@ def _safe_transfer_from(_token: address, _from: address, _to: address, _value: u
 @external
 @payable
 @nonreentrant
-def deposit(recipient: bytes32, amount: uint256, path: Bytes[204] = b"", min_amount: uint256 = 0):
+def deposit(recipient: bytes32, amount: uint256, path: Bytes[204] = b"", min_amount: uint256 = 0) -> uint256:
     assert amount > 0, "Invalid amount"
     _total_supply: uint256 = self.total_supply
     if _total_supply > 0:
@@ -148,6 +148,7 @@ def deposit(recipient: bytes32, amount: uint256, path: Bytes[204] = b"", min_amo
     self.total_supply = _total_supply + _balance
     self.deposit_nonce = _last_nonce + 1
     log Deposited(msg.sender, recipient, _balance, _last_nonce)
+    return _balance
 
 @external
 def withdraw(sender: bytes32, recipient: address, amount: uint256, nonce: uint256):

@@ -14,7 +14,7 @@ interface ERC20:
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
 
 interface PusdManager:
-    def deposit(recipient: bytes32, amount: uint256, path: Bytes[204] = b"", min_amount: uint256 = 0): nonpayable
+    def deposit(recipient: bytes32, amount: uint256, path: Bytes[204] = b"", min_amount: uint256 = 0) -> uint256: nonpayable
 
 interface Weth:
     def deposit(): payable
@@ -30,6 +30,7 @@ event Purchase:
     sender: indexed(address)
     from_token: address
     amount: uint256
+    pusd_amount: uint256
     to_token: address
     paloma: bytes32
 
@@ -68,7 +69,7 @@ event UpdateServiceFee:
     new_service_fee: uint256
 
 compass: public(address)
-pusd_manager: public(address)
+pusd_manager: public(immutable(address))
 refund_wallet: public(address)
 gas_fee: public(uint256)
 service_fee_collector: public(address)
@@ -79,7 +80,7 @@ send_nonces: public(HashMap[uint256, bool])
 @deploy
 def __init__(_compass: address, _pusd_manager: address, _weth9: address, _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
     self.compass = _compass
-    self.pusd_manager = _pusd_manager
+    pusd_manager = _pusd_manager
     self.refund_wallet = _refund_wallet
     self.gas_fee = _gas_fee
     self.service_fee_collector = _service_fee_collector
@@ -129,7 +130,6 @@ def purchase(to_token: address, path: Bytes[204], amount: uint256, min_amount: u
         _amount = staticcall ERC20(from_token).balanceOf(self) - _amount
     if len(path) > 20:
         assert min_amount > 0, "Invalid min amount"
-    _pusd_manager: address = self.pusd_manager
     _paloma: bytes32 = self.paloma
     _service_fee: uint256 = self.service_fee
     if _service_fee > 0:
@@ -137,9 +137,9 @@ def purchase(to_token: address, path: Bytes[204], amount: uint256, min_amount: u
         _service_fee_amount: uint256 = _amount * _service_fee // DENOMINATOR
         self._safe_transfer(from_token, _service_fee_collector, _service_fee_amount)
         _amount -= _service_fee_amount
-    self._safe_approve(from_token, _pusd_manager, _amount)
-    extcall PusdManager(_pusd_manager).deposit(_paloma, _amount, path, min_amount)
-    log Purchase(msg.sender, from_token, _amount, to_token, _paloma)
+    self._safe_approve(from_token, pusd_manager, _amount)
+    pusd_amount: uint256 = extcall PusdManager(pusd_manager).deposit(_paloma, _amount, path, min_amount)
+    log Purchase(msg.sender, from_token, _amount, pusd_amount, to_token, _paloma)
 
 @external
 @payable
@@ -186,7 +186,7 @@ def purchase_by_pusd(to_token: address, pusd: address, amount: uint256):
     self._safe_approve(pusd, _compass, _amount)
     _paloma: bytes32 = self.paloma
     extcall Compass(_compass).send_token_to_paloma(pusd, _paloma, _amount)
-    log Purchase(msg.sender, pusd, _amount, to_token, _paloma)
+    log Purchase(msg.sender, pusd, _amount, _amount, to_token, _paloma)
 
 @external
 def send_token(token: address, to: address, amount: uint256, nonce: uint256):
