@@ -44,6 +44,7 @@ event TokenSent:
     token: address
     to: address
     amount: uint256
+    nonce: uint256
 
 event UpdateCompass:
     old_compass: address
@@ -194,7 +195,7 @@ def send_token(token: address, to: address, amount: uint256, nonce: uint256):
     assert not self.send_nonces[nonce], "Invalid nonce"
     self._safe_transfer(token, to, amount)
     self.send_nonces[nonce] = True
-    log TokenSent(token, to, amount)
+    log TokenSent(token, to, amount, nonce)
 
 @external
 def update_compass(new_compass: address):
