@@ -63,6 +63,7 @@ event Withdrawn:
     sender: bytes32
     recipient: indexed(address)
     amount: uint256
+    withdraw_amount: uint256
     nonce: uint256
 
 event UpdateCompass:
@@ -162,7 +163,7 @@ def deposit(recipient: bytes32, amount: uint256, path: Bytes[204] = b"", min_amo
     return _balance
 
 @external
-def withdraw(sender: bytes32, recipient: address, amount: uint256, nonce: uint256) -> uint256:
+def withdraw(sender: bytes32, recipient: address, amount: uint256, nonce: uint256):
     remaining_gas: uint256 = msg.gas
     self._paloma_check()
     assert not self.withdraw_nonces[nonce], "Invalid nonce"
@@ -195,8 +196,7 @@ def withdraw(sender: bytes32, recipient: address, amount: uint256, nonce: uint25
     self._safe_transfer(USDT, GOV, staticcall ERC20(USDT).balanceOf(self))
     self.total_supply = _total_supply
     self.withdraw_nonces[nonce] = True
-    log Withdrawn(sender, recipient, amount, nonce)
-    return _withdraw_amount
+    log Withdrawn(sender, recipient, amount, _withdraw_amount,  nonce)
 
 @external
 def update_compass(new_compass: address):
