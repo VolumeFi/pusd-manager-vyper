@@ -37,6 +37,7 @@ interface Weth:
 interface Compass:
     def slc_switch() -> bool: view
 
+DENOMINATOR: public(constant(uint256)) = 10 ** 18
 USDT: public(immutable(address))
 Pool: public(immutable(address))
 GOV: public(immutable(address))
@@ -50,6 +51,7 @@ withdraw_nonces: public(HashMap[uint256, bool])
 deposit_nonce: public(uint256)
 paloma: public(bytes32)
 total_supply: public(uint256)
+redemption_fee: public(uint256)
 
 event Deposited:
     sender: indexed(address)
@@ -71,11 +73,15 @@ event UpdateRefundWallet:
     old_wallet: address
     new_wallet: address
 
+event UpdateRedemptionFee:
+    old_redemption_fee: uint256
+    new_redemption_fee: uint256
+
 event SetPaloma:
     paloma: bytes32
 
 @deploy
-def __init__(_compass_evm: address, _usdt: address, _pool: address, _aggregator: address, _exponent: uint256, _governance: address, _refund_wallet: address, _router02: address):
+def __init__(_compass_evm: address, _usdt: address, _pool: address, _aggregator: address, _exponent: uint256, _governance: address, _refund_wallet: address, _router02: address, _redepmtion_fee: uint256):
     self.compass_evm = _compass_evm
     USDT = _usdt
     Pool = _pool
@@ -86,8 +92,11 @@ def __init__(_compass_evm: address, _usdt: address, _pool: address, _aggregator:
     WETH9 = staticcall SwapRouter02(_router02).WETH9()
     self.refund_wallet = _refund_wallet
     assert extcall ERC20(USDT).approve(Pool, max_value(uint256), default_return_value=True), "Failed approve"
+    assert _redepmtion_fee < DENOMINATOR, "Invalid redemption fee"
+    self.redemption_fee = _redepmtion_fee
     log UpdateCompass(empty(address), _compass_evm)
     log UpdateRefundWallet(empty(address), _refund_wallet)
+    log UpdateRedemptionFee(0, _redepmtion_fee)
 
 @internal
 def _paloma_check():
@@ -100,11 +109,13 @@ def _safe_approve(_token: address, _to: address, _value: uint256):
 
 @internal
 def _safe_transfer(_token: address, _to: address, _value: uint256):
-    assert extcall ERC20(_token).transfer(_to, _value, default_return_value=True), "Failed transfer"
+    if _value > 0:
+        assert extcall ERC20(_token).transfer(_to, _value, default_return_value=True), "Failed transfer"
 
 @internal
 def _safe_transfer_from(_token: address, _from: address, _to: address, _value: uint256):
-    assert extcall ERC20(_token).transferFrom(_from, _to, _value, default_return_value=True), "Failed transferFrom"
+    if _value > 0:
+        assert extcall ERC20(_token).transferFrom(_from, _to, _value, default_return_value=True), "Failed transferFrom"
 
 @external
 @payable
@@ -158,7 +169,6 @@ def withdraw(sender: bytes32, recipient: address, amount: uint256, nonce: uint25
     assert recipient != self.compass_evm, "Invalid recipient"
     assert amount > 0, "Invalid amount"
     _total_supply: uint256 = self.total_supply
-    assert _total_supply >= amount, "Insufficient deposit"
     extcall AAVEPoolV3(Pool).withdraw(USDT, max_value(uint256), self)
     gas_price: uint256 = tx.gasprice
     round_id: uint80 = 0
@@ -172,8 +182,14 @@ def withdraw(sender: bytes32, recipient: address, amount: uint256, nonce: uint25
     assert amount >= _amount + _amount, "Amount can not cover gas fee"
     self._safe_transfer(USDT, GOV, _amount)
     self._safe_transfer(USDT, self.refund_wallet, _amount)
-    self._safe_transfer(USDT, recipient, amount - _amount - _amount)
-    _total_supply = _total_supply - amount
+    _redepmtion_fee: uint256 = self.redemption_fee
+    _withdraw_amount: uint256 = amount - _amount - _amount
+    if _redepmtion_fee > 0:
+        _redepmtion_fee = _withdraw_amount * _redepmtion_fee // DENOMINATOR
+        _withdraw_amount -= _redepmtion_fee
+    assert _total_supply >= _withdraw_amount + _amount + _amount, "Insufficient deposit"
+    _total_supply = _total_supply - _withdraw_amount - _amount - _amount
+    self._safe_transfer(USDT, recipient, _withdraw_amount)
     if _total_supply > 0:
         extcall AAVEPoolV3(Pool).supply(USDT, _total_supply, self, 0)
     self._safe_transfer(USDT, GOV, staticcall ERC20(USDT).balanceOf(self))
@@ -195,6 +211,14 @@ def update_refund_wallet(_new_refund_wallet: address):
     _old_refund_wallet: address = self.refund_wallet
     self.refund_wallet = _new_refund_wallet
     log UpdateRefundWallet(_old_refund_wallet, _new_refund_wallet)
+
+@external
+def update_redemption_fee(_new_redemption_fee: uint256):
+    assert _new_redemption_fee < DENOMINATOR, "Invalid redemption fee"
+    self._paloma_check()
+    _old_redemption_fee: uint256 = self.redemption_fee
+    self.redemption_fee = _new_redemption_fee
+    log UpdateRedemptionFee(_old_redemption_fee, _new_redemption_fee)
 
 @external
 def set_paloma():
