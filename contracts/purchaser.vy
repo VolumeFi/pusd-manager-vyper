@@ -154,12 +154,12 @@ def sell(from_token: address, amount: uint256):
         if msg.value > _gas_fee:
             raw_call(msg.sender, b"", value=msg.value - _gas_fee)
         send(self.refund_wallet, _gas_fee)
+    self._safe_transfer_from(from_token, msg.sender, self, _amount)
     if _service_fee > 0:
         _service_fee_collector: address = self.service_fee_collector
         _service_fee_amount: uint256 = amount * _service_fee // DENOMINATOR
         self._safe_transfer(from_token, _service_fee_collector, _service_fee_amount)
         _amount -= _service_fee_amount
-    self._safe_transfer_from(from_token, msg.sender, self, _amount)
     _compass: address = self.compass
     _paloma: bytes32 = self.paloma
     self._safe_approve(from_token, _compass, _amount)
@@ -179,6 +179,7 @@ def purchase_by_pusd(to_token: address, pusd: address, amount: uint256):
     _compass: address = self.compass
     _service_fee: uint256 = self.service_fee
     _amount: uint256 = amount
+    self._safe_transfer_from(pusd, msg.sender, self, _amount)
     if _service_fee > 0:
         _service_fee_collector: address = self.service_fee_collector
         _service_fee_amount: uint256 = amount * _service_fee // DENOMINATOR
