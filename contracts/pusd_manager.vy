@@ -38,7 +38,7 @@ interface Compass:
     def slc_switch() -> bool: view
 
 DENOMINATOR: public(constant(uint256)) = 10 ** 18
-USDT: public(immutable(address))
+ASSET: public(immutable(address))
 Pool: public(immutable(address))
 GOV: public(immutable(address))
 Aggregator: public(immutable(address))
@@ -82,9 +82,9 @@ event SetPaloma:
     paloma: bytes32
 
 @deploy
-def __init__(_compass_evm: address, _usdt: address, _pool: address, _aggregator: address, _exponent: uint256, _governance: address, _refund_wallet: address, _router02: address, _redepmtion_fee: uint256):
+def __init__(_compass_evm: address, _initial_asset: address, _pool: address, _aggregator: address, _exponent: uint256, _governance: address, _refund_wallet: address, _router02: address, _redepmtion_fee: uint256):
     self.compass_evm = _compass_evm
-    USDT = _usdt
+    ASSET = _initial_asset
     Pool = _pool
     GOV = _governance
     Aggregator = _aggregator
@@ -92,7 +92,7 @@ def __init__(_compass_evm: address, _usdt: address, _pool: address, _aggregator:
     ROUTER02 = _router02
     WETH9 = staticcall SwapRouter02(_router02).WETH9()
     self.refund_wallet = _refund_wallet
-    assert extcall ERC20(USDT).approve(Pool, max_value(uint256), default_return_value=True), "Failed approve"
+    assert extcall ERC20(ASSET).approve(Pool, max_value(uint256), default_return_value=True), "Failed approve"
     assert _redepmtion_fee < DENOMINATOR, "Invalid redemption fee"
     self.redemption_fee = _redepmtion_fee
     log UpdateCompass(empty(address), _compass_evm)
@@ -125,16 +125,24 @@ def deposit(recipient: bytes32, amount: uint256, path: Bytes[204] = b"", min_amo
     assert amount > 0, "Invalid amount"
     _total_supply: uint256 = self.total_supply
     if _total_supply > 0:
-        extcall AAVEPoolV3(Pool).withdraw(USDT, max_value(uint256), self)
-        _amount: uint256 = staticcall ERC20(USDT).balanceOf(self) - _total_supply
+        extcall AAVEPoolV3(Pool).withdraw(ASSET, max_value(uint256), self)
+        _amount: uint256 = staticcall ERC20(ASSET).balanceOf(self) - _total_supply
         if _amount > 0:
-            self._safe_transfer(USDT, GOV, _amount)
+            self._safe_transfer(ASSET, GOV, _amount)
     _last_nonce: uint256 = self.deposit_nonce
     _balance: uint256 = 0
     if path == b"":
-        if msg.value > 0:
-            raw_call(msg.sender, b"", value=msg.value)
-        self._safe_transfer_from(USDT, msg.sender, self, amount)
+        if ASSET == WETH9:
+            if msg.value >= amount:
+                if msg.value > amount:
+                    raw_call(msg.sender, b"", value=msg.value - amount)
+                extcall Weth(WETH9).deposit(value=amount)
+            else:
+                self._safe_transfer_from(ASSET, msg.sender, self, amount)
+        else:
+            if msg.value > 0:
+                raw_call(msg.sender, b"", value=msg.value)
+            self._safe_transfer_from(ASSET, msg.sender, self, amount)
         _balance = amount
     else:
         from_token: address = convert(slice(path, 0, 20), address)
@@ -147,16 +155,16 @@ def deposit(recipient: bytes32, amount: uint256, path: Bytes[204] = b"", min_amo
         else:
             self._safe_transfer_from(from_token, msg.sender, self, amount)
         self._safe_approve(from_token, ROUTER02, amount)
-        _balance = staticcall ERC20(USDT).balanceOf(self)
+        _balance = staticcall ERC20(ASSET).balanceOf(self)
         extcall SwapRouter02(ROUTER02).exactInput(ExactInputParams(
             path = path,
             recipient = self,
             amountIn = amount,
             amountOutMinimum = min_amount
         ))
-        _balance = staticcall ERC20(USDT).balanceOf(self) - _balance
-    assert _balance > 0, "USDT amount is zero"
-    extcall AAVEPoolV3(Pool).supply(USDT, staticcall ERC20(USDT).balanceOf(self), self, 0)
+        _balance = staticcall ERC20(ASSET).balanceOf(self) - _balance
+    assert _balance > 0, "ASSET amount is zero"
+    extcall AAVEPoolV3(Pool).supply(ASSET, staticcall ERC20(ASSET).balanceOf(self), self, 0)
     self.total_supply = _total_supply + _balance
     self.deposit_nonce = _last_nonce + 1
     log Deposited(msg.sender, recipient, _balance, _last_nonce)
@@ -170,7 +178,7 @@ def withdraw(sender: bytes32, recipient: address, amount: uint256, nonce: uint25
     assert recipient != self.compass_evm, "Invalid recipient"
     assert amount > 0, "Invalid amount"
     _total_supply: uint256 = self.total_supply
-    extcall AAVEPoolV3(Pool).withdraw(USDT, max_value(uint256), self)
+    extcall AAVEPoolV3(Pool).withdraw(ASSET, max_value(uint256), self)
     gas_price: uint256 = tx.gasprice
     round_id: uint80 = 0
     price: int256 = 0
@@ -179,10 +187,10 @@ def withdraw(sender: bytes32, recipient: address, amount: uint256, nonce: uint25
     answered_in_round: uint80 = 0
     round_id, price, start_at, update_at, answered_in_round = staticcall ChainlinkAggregator(Aggregator).latestRoundData()
     assert price > 0, "Invalid price"
-    _amount: uint256 = remaining_gas * gas_price * convert(price, uint256) * 10 ** convert(staticcall ERC20(USDT).decimals(), uint256) // 10 ** (Exponent + 18)
+    _amount: uint256 = remaining_gas * gas_price * convert(price, uint256) * 10 ** convert(staticcall ERC20(ASSET).decimals(), uint256) // 10 ** (Exponent + 18)
     assert amount >= _amount + _amount, "Amount can not cover gas fee"
-    self._safe_transfer(USDT, GOV, _amount)
-    self._safe_transfer(USDT, self.refund_wallet, _amount)
+    self._safe_transfer(ASSET, GOV, _amount)
+    self._safe_transfer(ASSET, self.refund_wallet, _amount)
     _redepmtion_fee: uint256 = self.redemption_fee
     _withdraw_amount: uint256 = amount - _amount - _amount
     if _redepmtion_fee > 0:
@@ -190,10 +198,10 @@ def withdraw(sender: bytes32, recipient: address, amount: uint256, nonce: uint25
         _withdraw_amount -= _redepmtion_fee
     assert _total_supply >= _withdraw_amount + _amount + _amount, "Insufficient deposit"
     _total_supply = _total_supply - _withdraw_amount - _amount - _amount
-    self._safe_transfer(USDT, recipient, _withdraw_amount)
+    self._safe_transfer(ASSET, recipient, _withdraw_amount)
     if _total_supply > 0:
-        extcall AAVEPoolV3(Pool).supply(USDT, _total_supply, self, 0)
-    self._safe_transfer(USDT, GOV, staticcall ERC20(USDT).balanceOf(self))
+        extcall AAVEPoolV3(Pool).supply(ASSET, _total_supply, self, 0)
+    self._safe_transfer(ASSET, GOV, staticcall ERC20(ASSET).balanceOf(self))
     self.total_supply = _total_supply
     self.withdraw_nonces[nonce] = True
     log Withdrawn(sender, recipient, amount, _withdraw_amount,  nonce)
