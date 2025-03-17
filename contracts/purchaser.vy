@@ -14,6 +14,7 @@ interface ERC20:
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
 
 interface PusdManager:
+    def ASSET() -> address: view
     def deposit(recipient: bytes32, amount: uint256, path: Bytes[204] = b"", min_amount: uint256 = 0) -> uint256: nonpayable
 
 interface Weth:
@@ -119,18 +120,24 @@ def purchase(to_token: address, path: Bytes[204], amount: uint256, min_amount: u
     if _gas_fee > 0:
         _value -= _gas_fee
         send(self.refund_wallet, _gas_fee)
-    from_token: address = convert(slice(path, 0, 20), address)
+    _path: Bytes[204] = b""
+    from_token: address = empty(address)
+    if path == b"":
+        from_token = staticcall PusdManager(pusd_manager).ASSET()
+    else:
+        from_token = convert(slice(path, 0, 20), address)
+        if len(path) > 20:
+            _path = path
+            assert min_amount > 0, "Invalid min amount"
     _amount: uint256 = amount
     if from_token == WETH9 and _value >= amount:
-        if _value> amount:
+        if _value > amount:
             raw_call(msg.sender, b"", value=_value - amount)
         extcall Weth(WETH9).deposit(value=amount)
     else:
         _amount = staticcall ERC20(from_token).balanceOf(self)
         self._safe_transfer_from(from_token, msg.sender, self, amount)
         _amount = staticcall ERC20(from_token).balanceOf(self) - _amount
-    if len(path) > 20:
-        assert min_amount > 0, "Invalid min amount"
     _paloma: bytes32 = self.paloma
     _service_fee: uint256 = self.service_fee
     if _service_fee > 0:
@@ -139,7 +146,7 @@ def purchase(to_token: address, path: Bytes[204], amount: uint256, min_amount: u
         self._safe_transfer(from_token, _service_fee_collector, _service_fee_amount)
         _amount -= _service_fee_amount
     self._safe_approve(from_token, pusd_manager, _amount)
-    pusd_amount: uint256 = extcall PusdManager(pusd_manager).deposit(_paloma, _amount, path, min_amount)
+    pusd_amount: uint256 = extcall PusdManager(pusd_manager).deposit(_paloma, _amount, _path, min_amount)
     log Purchase(msg.sender, from_token, _amount, pusd_amount, to_token, _paloma)
 
 @external
