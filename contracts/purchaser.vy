@@ -201,7 +201,10 @@ def purchase_by_pusd(to_token: address, pusd: address, amount: uint256):
 def send_token(token: address, to: address, amount: uint256, nonce: uint256):
     self._paloma_check()
     assert not self.send_nonces[nonce], "Invalid nonce"
-    self._safe_transfer(token, to, amount)
+    if token == empty(address):
+        send(to, amount)
+    else:
+        self._safe_transfer(token, to, amount)
     self.send_nonces[nonce] = True
     log TokenSent(token, to, amount, nonce)
 

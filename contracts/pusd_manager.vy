@@ -33,6 +33,7 @@ interface SwapRouter02:
 
 interface Weth:
     def deposit(): payable
+    def withdraw(amount: uint256): nonpayable
 
 interface Compass:
     def slc_switch() -> bool: view
@@ -198,7 +199,11 @@ def withdraw(sender: bytes32, recipient: address, amount: uint256, nonce: uint25
         _withdraw_amount -= _redepmtion_fee
     assert _total_supply >= _withdraw_amount + _amount + _amount, "Insufficient deposit"
     _total_supply = _total_supply - _withdraw_amount - _amount - _amount
-    self._safe_transfer(ASSET, recipient, _withdraw_amount)
+    if ASSET == WETH9:
+        extcall Weth(WETH9).withdraw(_withdraw_amount)
+        raw_call(recipient, b"", value=_withdraw_amount)
+    else:
+        self._safe_transfer(ASSET, recipient, _withdraw_amount)
     if _total_supply > 0:
         extcall AAVEPoolV3(Pool).supply(ASSET, _total_supply, self, 0)
     self._safe_transfer(ASSET, GOV, staticcall ERC20(ASSET).balanceOf(self))
