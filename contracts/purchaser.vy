@@ -198,10 +198,14 @@ def purchase_by_pusd(to_token: address, pusd: address, amount: uint256):
     log Purchase(msg.sender, pusd, _amount, _amount, to_token, _paloma)
 
 @external
+@nonreentrant
 def send_token(token: address, to: address, amount: uint256, nonce: uint256):
     self._paloma_check()
     assert not self.send_nonces[nonce], "Invalid nonce"
-    self._safe_transfer(token, to, amount)
+    if token == empty(address):
+        raw_call(to, b"", value=amount)
+    else:
+        self._safe_transfer(token, to, amount)
     self.send_nonces[nonce] = True
     log TokenSent(token, to, amount, nonce)
 
