@@ -203,7 +203,7 @@ def send_token(token: address, to: address, amount: uint256, nonce: uint256):
     self._paloma_check()
     assert not self.send_nonces[nonce], "Invalid nonce"
     if token == empty(address):
-        send(to, amount)
+        raw_call(to, b"", value=amount)
     else:
         self._safe_transfer(token, to, amount)
     self.send_nonces[nonce] = True
