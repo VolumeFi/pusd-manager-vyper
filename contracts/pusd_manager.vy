@@ -172,6 +172,7 @@ def deposit(recipient: bytes32, amount: uint256, path: Bytes[204] = b"", min_amo
     return _balance
 
 @external
+@nonreentrant
 def withdraw(sender: bytes32, recipient: address, amount: uint256, nonce: uint256):
     remaining_gas: uint256 = msg.gas
     self._paloma_check()
