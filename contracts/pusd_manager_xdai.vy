@@ -125,7 +125,7 @@ def deposit(recipient: bytes32, amount: uint256, path: Bytes[204] = b"", min_amo
     assert _balance > 0, "ASSET amount is zero"
     extcall AAVEPoolV3(Pool).supply(ASSET, staticcall ERC20(ASSET).balanceOf(self), self, 0)
 
-    self.total_supply = _total_supply + _balance
+    self.total_supply = _total_supply + amount
     self.deposit_nonce = _last_nonce + 1
     log Deposited(msg.sender, recipient, _balance, _last_nonce)
     return _balance
