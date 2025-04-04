@@ -155,8 +155,8 @@ def withdraw(sender: bytes32, recipient: address, amount: uint256, nonce: uint25
     self._safe_transfer(ASSET, GOV, gas_amount)
     self._safe_transfer(ASSET, self.refund_wallet, gas_amount)
     _withdraw_amount: uint256 = _amount - gas_amount - gas_amount
-    assert _total_supply >= _withdraw_balance, "Insufficient deposit"
-    _total_supply = _total_supply - _withdraw_balance
+    assert _total_supply >= _amount, "Insufficient deposit"
+    _total_supply = _total_supply - _amount
     extcall Weth(ASSET).withdraw(_withdraw_amount)
     raw_call(recipient, b"", value=_withdraw_amount)
     if _total_supply > 0:
