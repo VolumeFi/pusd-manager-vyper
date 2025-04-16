@@ -2,7 +2,7 @@
 #pragma optimize gas
 #pragma evm-version cancun
 """
-@title Bonding Curve Trader Vyper
+@title PUSD connector
 @license Apache 2.0
 @author Volume.finance
 """
@@ -27,25 +27,20 @@ interface Compass:
 DENOMINATOR: constant(uint256) = 10 ** 18
 WETH9: public(immutable(address))
 
-event Purchase:
+event Purchased:
     sender: indexed(address)
     from_token: address
     amount: uint256
     pusd_amount: uint256
-    to_token: address
+    nonce: uint256
     paloma: bytes32
 
-event Sell:
+event Withdrawn:
     sender: indexed(address)
     from_token: address
     amount: uint256
-    paloma: bytes32
-
-event TokenSent:
-    token: address
-    to: address
-    amount: uint256
     nonce: uint256
+    paloma: bytes32
 
 event UpdateCompass:
     old_compass: address
@@ -70,29 +65,46 @@ event UpdateServiceFee:
     old_service_fee: uint256
     new_service_fee: uint256
 
+event UpdateWithdrawLimit:
+    old_withdraw_limit: uint256
+    new_withdraw_limit: uint256
+
+event UpdatePusdManager:
+    old_pusd_manager: address
+    new_pusd_manager: address
+
+event UpdatePusd:
+    old_pusd: address
+    new_pusd: address
+
 compass: public(address)
-pusd_manager: public(immutable(address))
+pusd: public(address)
+withdraw_limit: public(uint256)
+pusd_manager: public(address)
 refund_wallet: public(address)
 gas_fee: public(uint256)
 service_fee_collector: public(address)
 service_fee: public(uint256)
+nonce: public(uint256)
 paloma: public(bytes32)
-send_nonces: public(HashMap[uint256, bool])
 
 @deploy
-def __init__(_compass: address, _pusd_manager: address, _weth9: address, _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
+def __init__(_compass: address, _pusd_manager: address, _pusd: address, _withdraw_limit: uint256, _weth9: address, _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
     self.compass = _compass
-    pusd_manager = _pusd_manager
+    self.pusd_manager = _pusd_manager
+    self.pusd = _pusd
     self.refund_wallet = _refund_wallet
     self.gas_fee = _gas_fee
     self.service_fee_collector = _service_fee_collector
     self.service_fee = _service_fee
+    self.withdraw_limit = _withdraw_limit
     WETH9 = _weth9
     log UpdateCompass(empty(address), _compass)
     log UpdateRefundWallet(empty(address), _refund_wallet)
     log UpdateGasFee(0, _gas_fee)
     log UpdateServiceFeeCollector(empty(address), _service_fee_collector)
     log UpdateServiceFee(0, _service_fee)
+    log UpdateWithdrawLimit(0, _withdraw_limit)
 
 @internal
 def _safe_approve(_token: address, _to: address, _value: uint256):
@@ -114,8 +126,7 @@ def _paloma_check():
 @external
 @payable
 @nonreentrant
-def purchase(to_token: address, path: Bytes[204], amount: uint256, min_amount: uint256 = 0):
-    assert amount > 0, "Insufficient amount"
+def purchase(path: Bytes[204], amount: uint256, min_amount: uint256 = 0):
     _value: uint256 = msg.value
     _gas_fee: uint256 = self.gas_fee
     if _gas_fee > 0:
@@ -123,8 +134,9 @@ def purchase(to_token: address, path: Bytes[204], amount: uint256, min_amount: u
         send(self.refund_wallet, _gas_fee)
     _path: Bytes[204] = b""
     from_token: address = empty(address)
+    _pusd_manager: address = self.pusd_manager
     if path == b"":
-        from_token = staticcall PusdManager(pusd_manager).ASSET()
+        from_token = staticcall PusdManager(_pusd_manager).ASSET()
     else:
         from_token = convert(slice(path, 0, 20), address)
         if len(path) > 20:
@@ -146,15 +158,18 @@ def purchase(to_token: address, path: Bytes[204], amount: uint256, min_amount: u
         _service_fee_amount: uint256 = _amount * _service_fee // DENOMINATOR
         self._safe_transfer(from_token, _service_fee_collector, _service_fee_amount)
         _amount -= _service_fee_amount
-    self._safe_approve(from_token, pusd_manager, _amount)
-    pusd_amount: uint256 = extcall PusdManager(pusd_manager).deposit(_paloma, _amount, _path, min_amount)
-    log Purchase(msg.sender, from_token, _amount, pusd_amount, to_token, _paloma)
+    self._safe_approve(from_token, _pusd_manager, _amount)
+    pusd_amount: uint256 = extcall PusdManager(_pusd_manager).deposit(_paloma, _amount, _path, min_amount)
+    _nonce: uint256 = self.nonce
+    _nonce += 1
+    self.nonce = _nonce
+    log Purchased(msg.sender, from_token, _amount, pusd_amount, _nonce, _paloma)
 
 @external
 @payable
 @nonreentrant
-def sell(from_token: address, amount: uint256):
-    assert amount > 0, "Insufficient amount"
+def withdraw(amount: uint256):
+    assert amount > self.withdraw_limit, "Insufficient withdraw limit"
     _amount: uint256 = amount
     _service_fee: uint256 = self.service_fee
     _gas_fee: uint256 = self.gas_fee
@@ -163,6 +178,7 @@ def sell(from_token: address, amount: uint256):
         if msg.value > _gas_fee:
             raw_call(msg.sender, b"", value=msg.value - _gas_fee)
         send(self.refund_wallet, _gas_fee)
+    from_token: address = self.pusd
     self._safe_transfer_from(from_token, msg.sender, self, _amount)
     if _service_fee > 0:
         _service_fee_collector: address = self.service_fee_collector
@@ -173,44 +189,10 @@ def sell(from_token: address, amount: uint256):
     _paloma: bytes32 = self.paloma
     self._safe_approve(from_token, _compass, _amount)
     extcall Compass(_compass).send_token_to_paloma(from_token, _paloma, _amount)
-    log Sell(msg.sender, from_token, _amount, _paloma)
-
-@external
-@payable
-@nonreentrant
-def purchase_by_pusd(to_token: address, pusd: address, amount: uint256):
-    assert amount > 0, "Insufficient amount"
-    _gas_fee: uint256 = self.gas_fee
-    if _gas_fee > 0:
-        assert msg.value >= _gas_fee, "Invalid gas fee"
-        if msg.value > _gas_fee:
-            raw_call(msg.sender, b"", value=msg.value - _gas_fee)
-        send(self.refund_wallet, _gas_fee)
-    _compass: address = self.compass
-    _service_fee: uint256 = self.service_fee
-    _amount: uint256 = amount
-    self._safe_transfer_from(pusd, msg.sender, self, _amount)
-    if _service_fee > 0:
-        _service_fee_collector: address = self.service_fee_collector
-        _service_fee_amount: uint256 = amount * _service_fee // DENOMINATOR
-        self._safe_transfer(pusd, _service_fee_collector, _service_fee_amount)
-        _amount -= _service_fee_amount
-    self._safe_approve(pusd, _compass, _amount)
-    _paloma: bytes32 = self.paloma
-    extcall Compass(_compass).send_token_to_paloma(pusd, _paloma, _amount)
-    log Purchase(msg.sender, pusd, _amount, _amount, to_token, _paloma)
-
-@external
-@nonreentrant
-def send_token(token: address, to: address, amount: uint256, nonce: uint256):
-    self._paloma_check()
-    assert not self.send_nonces[nonce], "Invalid nonce"
-    if token == empty(address):
-        raw_call(to, b"", value=amount)
-    else:
-        self._safe_transfer(token, to, amount)
-    self.send_nonces[nonce] = True
-    log TokenSent(token, to, amount, nonce)
+    _nonce: uint256 = self.nonce
+    _nonce += 1
+    self.nonce = _nonce
+    log Withdrawn(msg.sender, from_token, _amount, _nonce, _paloma)
 
 @external
 def update_compass(new_compass: address):
@@ -255,6 +237,26 @@ def update_service_fee(new_service_fee: uint256):
     old_service_fee: uint256 = self.service_fee
     self.service_fee = new_service_fee
     log UpdateServiceFee(old_service_fee, new_service_fee)
+
+@external
+def update_withdraw_limit(new_withdraw_limit: uint256):
+    self._paloma_check()
+    self.withdraw_limit = new_withdraw_limit
+    log UpdateWithdrawLimit(self.withdraw_limit, new_withdraw_limit)
+
+@external
+def update_pusd_manager(new_pusd_manager: address):
+    self._paloma_check()
+    old_pusd_manager: address = self.pusd_manager
+    self.pusd_manager = new_pusd_manager
+    log UpdatePusdManager(old_pusd_manager, new_pusd_manager)
+
+@external
+def update_pusd(new_pusd: address):
+    self._paloma_check()
+    old_pusd: address = self.pusd
+    self.pusd = new_pusd
+    log UpdatePusd(old_pusd, new_pusd)
 
 @external
 @payable
