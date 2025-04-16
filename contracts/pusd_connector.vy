@@ -69,10 +69,18 @@ event UpdateWithdrawLimit:
     old_withdraw_limit: uint256
     new_withdraw_limit: uint256
 
+event UpdatePusdManager:
+    old_pusd_manager: address
+    new_pusd_manager: address
+
+event UpdatePusd:
+    old_pusd: address
+    new_pusd: address
+
 compass: public(address)
 pusd: public(address)
 withdraw_limit: public(uint256)
-pusd_manager: public(immutable(address))
+pusd_manager: public(address)
 refund_wallet: public(address)
 gas_fee: public(uint256)
 service_fee_collector: public(address)
@@ -81,9 +89,10 @@ nonce: public(uint256)
 paloma: public(bytes32)
 
 @deploy
-def __init__(_compass: address, _pusd_manager: address, _withdraw_limit: uint256, _weth9: address, _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
+def __init__(_compass: address, _pusd_manager: address, _pusd: address, _withdraw_limit: uint256, _weth9: address, _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
     self.compass = _compass
-    pusd_manager = _pusd_manager
+    self.pusd_manager = _pusd_manager
+    self.pusd = _pusd
     self.refund_wallet = _refund_wallet
     self.gas_fee = _gas_fee
     self.service_fee_collector = _service_fee_collector
@@ -125,8 +134,9 @@ def purchase(path: Bytes[204], amount: uint256, min_amount: uint256 = 0):
         send(self.refund_wallet, _gas_fee)
     _path: Bytes[204] = b""
     from_token: address = empty(address)
+    _pusd_manager: address = self.pusd_manager
     if path == b"":
-        from_token = staticcall PusdManager(pusd_manager).ASSET()
+        from_token = staticcall PusdManager(_pusd_manager).ASSET()
     else:
         from_token = convert(slice(path, 0, 20), address)
         if len(path) > 20:
@@ -148,8 +158,8 @@ def purchase(path: Bytes[204], amount: uint256, min_amount: uint256 = 0):
         _service_fee_amount: uint256 = _amount * _service_fee // DENOMINATOR
         self._safe_transfer(from_token, _service_fee_collector, _service_fee_amount)
         _amount -= _service_fee_amount
-    self._safe_approve(from_token, pusd_manager, _amount)
-    pusd_amount: uint256 = extcall PusdManager(pusd_manager).deposit(_paloma, _amount, _path, min_amount)
+    self._safe_approve(from_token, _pusd_manager, _amount)
+    pusd_amount: uint256 = extcall PusdManager(_pusd_manager).deposit(_paloma, _amount, _path, min_amount)
     _nonce: uint256 = self.nonce
     _nonce += 1
     self.nonce = _nonce
@@ -233,6 +243,20 @@ def update_withdraw_limit(new_withdraw_limit: uint256):
     self._paloma_check()
     self.withdraw_limit = new_withdraw_limit
     log UpdateWithdrawLimit(self.withdraw_limit, new_withdraw_limit)
+
+@external
+def update_pusd_manager(new_pusd_manager: address):
+    self._paloma_check()
+    old_pusd_manager: address = self.pusd_manager
+    self.pusd_manager = new_pusd_manager
+    log UpdatePusdManager(old_pusd_manager, new_pusd_manager)
+
+@external
+def update_pusd(new_pusd: address):
+    self._paloma_check()
+    old_pusd: address = self.pusd
+    self.pusd = new_pusd
+    log UpdatePusd(old_pusd, new_pusd)
 
 @external
 @payable
