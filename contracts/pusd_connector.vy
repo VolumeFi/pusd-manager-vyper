@@ -16,6 +16,8 @@ interface ERC20:
 interface PusdManager:
     def ASSET() -> address: view
     def deposit(recipient: bytes32, amount: uint256, path: Bytes[204] = b"", min_amount: uint256 = 0) -> uint256: nonpayable
+    def total_supply() -> uint256: view
+    def ASSET_DECIMALS_NUMERATOR() -> uint256: view
 
 interface Weth:
     def deposit(): payable
@@ -170,6 +172,10 @@ def purchase(path: Bytes[204], amount: uint256, min_amount: uint256 = 0):
 @nonreentrant
 def withdraw(amount: uint256):
     assert amount > self.withdraw_limit, "Insufficient withdraw limit"
+    _pusd_manager: address = self.pusd_manager
+    _total_supply: uint256 = staticcall PusdManager(_pusd_manager).total_supply()
+    _total_supply = _total_supply * staticcall PusdManager(_pusd_manager).ASSET_DECIMALS_NUMERATOR() // DENOMINATOR
+    assert amount <= _total_supply, "Asset is insufficient"
     _amount: uint256 = amount
     _service_fee: uint256 = self.service_fee
     _gas_fee: uint256 = self.gas_fee
